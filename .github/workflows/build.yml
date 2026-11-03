@@ -164,6 +164,32 @@ jobs:
           $p | Stop-Process -Force
           Write-Host "friend installer OK"
 
+      - name: Portable test (portable.txt next to the exe -> nothing written to AppData, no autostart, no shortcuts)
+        shell: pwsh
+        run: |
+          $pd = Join-Path $env:RUNNER_TEMP "Flow-HE נייד"
+          New-Item -ItemType Directory -Force $pd | Out-Null
+          Copy-Item dist\Flow-HE.exe $pd
+          Set-Content (Join-Path $pd "portable.txt") "portable"
+          $env:LOCALAPPDATA = Join-Path $env:RUNNER_TEMP "lad-portable"
+          New-Item -ItemType Directory -Force $env:LOCALAPPDATA | Out-Null
+          Get-Process Flow-HE -ErrorAction SilentlyContinue | Stop-Process -Force
+          $runBefore = (Get-ItemProperty "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -ErrorAction SilentlyContinue)."Flow-HE"
+          $p = Start-Process (Join-Path $pd "Flow-HE.exe") -PassThru
+          Start-Sleep 15
+          if ($p.HasExited) { throw "portable app exited" }
+          $log = Get-Content -Raw -Encoding utf8 (Join-Path $pd "flow.log")
+          if ($log -notmatch "נייד") { throw "portable mode not detected" }
+          if (Test-Path (Join-Path $env:LOCALAPPDATA "Flow-HE")) { throw "portable wrote to AppData" }
+          $runAfter = (Get-ItemProperty "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -ErrorAction SilentlyContinue)."Flow-HE"
+          if ($runAfter -ne $runBefore) { throw "portable registered autostart: $runAfter" }
+          if ($runAfter -and $runAfter -like "*נייד*") { throw "autostart points at portable copy" }
+          $desk = [Environment]::GetFolderPath("Desktop")
+          $lnk = Join-Path $desk "Flow-HE.lnk"
+          if ((Test-Path $lnk) -and ((New-Object -ComObject WScript.Shell).CreateShortcut($lnk).TargetPath -like "*נייד*")) { throw "portable created a shortcut" }
+          Stop-Process -Id $p.Id -Force
+          Write-Host "portable OK"
+
       - name: Package
         shell: pwsh
         run: |

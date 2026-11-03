@@ -27,11 +27,17 @@ def _fatal_box(msg: str):
         pass
 
 
+def _portable_dir():
+    """גרסה ניידת: portable.txt ליד ה-EXE -> הכול נשאר בתיקייה (בלי AppData, קיצורים או רישום להפעלה עם Windows)."""
+    d = _os.path.dirname(_os.path.abspath(_sys.executable if getattr(_sys, "frozen", False) else __file__))
+    return d if _os.path.exists(_os.path.join(d, "portable.txt")) else None
+
+
 def _excepthook(et, ev, tb):
     import traceback
     text = "".join(traceback.format_exception(et, ev, tb))
     try:
-        d = _os.path.join(_os.environ.get("LOCALAPPDATA", _os.path.expanduser("~")), "Flow-HE")
+        d = _portable_dir() or _os.path.join(_os.environ.get("LOCALAPPDATA", _os.path.expanduser("~")), "Flow-HE")
         _os.makedirs(d, exist_ok=True)
         with open(_os.path.join(d, "crash.log"), "a", encoding="utf-8") as f:
             f.write(text + "\n")
@@ -99,13 +105,14 @@ except OSError:
     VERSION = "dev"
 VERSION = os.environ.get("FLOWHE_VERSION_OVERRIDE", VERSION)
 SELFTEST = os.environ.get("FLOWHE_SELFTEST") == "1"
+PORTABLE = bool(_portable_dir())
 
 # תחת pythonw / EXE בלי קונסולה אין stdout: מפנים ל-flow.log
 if sys.stdout is None or sys.stderr is None:
     try:
         _logf = open(P("flow.log"), "a", encoding="utf-8", buffering=1)
     except OSError:
-        _d = os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), "Flow-HE")
+        _d = HERE if PORTABLE else os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), "Flow-HE")
         os.makedirs(_d, exist_ok=True)
         _logf = open(os.path.join(_d, "flow.log"), "a", encoding="utf-8", buffering=1)
     sys.stdout = sys.stderr = _logf
@@ -121,7 +128,7 @@ for _name, _src in (("config.json", "config.json"), ("dictionary.json", "diction
             pass
 
 # מופע יחיד: מופע חדש סוגר כל עותק ישן (מכל גרסה ומכל תיקייה) ותופס את מקומו
-_SHARED = os.path.join(os.environ.get("LOCALAPPDATA", HERE), "Flow-HE")
+_SHARED = HERE if PORTABLE else os.path.join(os.environ.get("LOCALAPPDATA", HERE), "Flow-HE")
 os.makedirs(_SHARED, exist_ok=True)
 QUIT_FLAG = os.path.join(_SHARED, "quit.flag")
 MUTEX_NAME = "Local\\FlowHE_single_instance"
@@ -2027,7 +2034,7 @@ class FlowBar:
         def settings():
             cur = CFG.get("mic_device")
             return [dict(text="מיקרופון" + (f"  ({short(cur, 16)})" if cur else ""), sub=mics),
-                    dict(text="הפעל עם Windows", mark="✓" if CFG.get("launch_at_login", True) else "", cmd=self._toggle_login),
+                    *([] if PORTABLE else [dict(text="הפעל עם Windows", mark="✓" if CFG.get("launch_at_login", True) else "", cmd=self._toggle_login)]),
                     dict(text="החזר את הכפתור למרכז", cmd=self._reset_pos),
                     dict(text="פתח את תיקיית הקבצים", cmd=lambda: os.startfile(HERE))]
 
@@ -2053,7 +2060,7 @@ class FlowBar:
         if v:
             items.append(dict(text=f"עדכן לגרסה {v}", mark="⬆", cmd=lambda: check_for_update(force=True)))
         items += [dict(text="יציאה", cmd=lambda: _pump_event(self.root, self, "quit", None)),
-                  ("header", f"Flow-HE · גרסה {VERSION}")]
+                  ("header", f"Flow-HE · גרסה {VERSION}" + (" · נייד" if PORTABLE else ""))]
         return items
 
     def _set_mic(self, name):
@@ -4308,7 +4315,7 @@ def run_ui():
     if FROZEN and not SELFTEST:
         cleanup_after_update()
         threading.Thread(target=lambda: (time.sleep(5), cleanup_leftovers()), daemon=True).start()
-        if CFG.get("launch_at_login", True):
+        if CFG.get("launch_at_login", True) and not PORTABLE:   # נייד: לא נרשמים למחשב
             set_launch_at_login(True)
     if FROZEN and (not SELFTEST or os.environ.get("FLOWHE_UPDATE_TEST")):
         force_now = "--update" in sys.argv or bool(os.environ.get("FLOWHE_UPDATE_TEST"))
@@ -4327,8 +4334,8 @@ def run_ui():
             check_for_update()  # מתקין לבד רק אם auto_update פעיל
             root.after(int(CFG.get("update_check_s", 15)) * 1000, _upd)
         root.after(1500 if force_now else 3000, _upd)
-        threading.Thread(target=ensure_shortcuts, daemon=True).start() if not SELFTEST else None
-    log("גרסה:", VERSION)
+        threading.Thread(target=ensure_shortcuts, daemon=True).start() if not (SELFTEST or PORTABLE) else None
+    log("גרסה:", VERSION, "(נייד — הכול בתיקייה הזאת)" if PORTABLE else "")
 
     def _env_watch():
         reload_env_if_changed()
