@@ -10,6 +10,9 @@ import _runpod  # noqa: E402
 
 
 class handler(BaseHTTPRequestHandler):
+    def do_OPTIONS(self):
+        _auth.preflight(self)
+
     def do_GET(self):
         if not _auth.check(self):
             return
